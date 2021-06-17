@@ -1,4 +1,4 @@
-module github.com/SADA-U-Session-3/GroupProject/sentiment
+module github.com/SADA-U-Session-3/sentiment-analysis
 
 go 1.16
 
