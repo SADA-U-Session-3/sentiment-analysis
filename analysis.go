@@ -10,34 +10,34 @@ import (
 
 // RedditPost is the struct of a reddit post pulled from this repos' scraped post
 type RedditPost struct {
-	Title            string   `json:"title"`
-	Score            int      `json:"score"`
-	ID               string   `json:"id"`
-	URL              string   `json:"url"`
-	CommentCount     int      `json:"comms_num"`
-	CreatedAt        float32  `json:"created"`
-	Body             string   `json:"body"`
-	Timestamp        float32  `json:"timestamp"` // same as CreatedAt
-	Comments         []string `json:"comments"`
-	Analysis         Analysis `json:"analysis"`
-	CommentsAnalysis Analysis `json:"commentsAnalysis"`
+	Title            string   `json:"title,omitempty"`
+	Score            int      `json:"score,omitempty"`
+	ID               string   `json:"id,omitempty"`
+	URL              string   `json:"url,omitempty"`
+	CommentCount     int      `json:"comms_num,omitempty"`
+	CreatedAt        float32  `json:"created,omitempty"`
+	Body             string   `json:"body,omitempty"`
+	Timestamp        float32  `json:"timestamp,omitempty"` // same as CreatedAt
+	Comments         []string `json:"comments,omitempty"`
+	Analysis         Analysis `json:"analysis,omitempty"`
+	CommentsAnalysis Analysis `json:"commentsAnalysis,omitempty"`
 }
 
 // Analysis hold the results from the sentiment analysis from Google's API
 type Analysis struct {
 	Sentiment struct {
-		Score           float32 `json:"score"`
-		ParsedSentiment string  `json:"parsedSentiment"`
-	} `json:"sentiment"`
+		Score           float32 `json:"score,omitempty"`
+		ParsedSentiment string  `json:"parsedSentiment,omitempty"`
+	} `json:"sentiment,omitempty"`
 	Entity struct {
-		Count map[string]int `json:"count"`
-	} `json:"entity"`
+		Count map[string]int `json:"count,omitempty"`
+	} `json:"entity,omitempty"`
 }
 
 // Posts a wrapper struct around the Hot and Top posts that help parse the scraped Reddit posts in this repo
 type Posts struct {
-	HotPosts []RedditPost `json:"hot_posts"`
-	TopPosts []RedditPost `json:"top_posts"`
+	HotPosts []RedditPost `json:"hot_posts,omitempty"`
+	TopPosts []RedditPost `json:"top_posts,omitempty"`
 }
 
 // PrintAnalysis prints the results of the posts from the Sentiment Analysis api
