@@ -48,29 +48,10 @@ func appendToFilename(filename string, addendum string) string {
 	return strings.Replace(filename, extension, "_", 1) + addendum + extension
 }
 
-func analyzePostHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("must be GET request"))
-
-		return
-	}
+func startAnalysis(filename, outputFilename string) {
 
 	projectBucket := "rube_goldberg_project"
 	subBucket := "reddit_data"
-
-	query := r.URL.Query()
-
-	// this file must live within cloud storage
-	filename := query.Get("filename")
-	outputFilename := appendToFilename(filename, "analyzed")
-
-	if filename == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("missing required input filename"))
-
-		return
-	}
 
 	ctx := context.Background()
 
@@ -82,6 +63,8 @@ func analyzePostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	defer languageClient.Close()
+
 	storageClient, err := storage.NewClient(ctx)
 
 	if err != nil {
@@ -90,10 +73,7 @@ func analyzePostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	defer (func(languageClient *language.Client, storageClient *storage.Client) {
-		languageClient.Close()
-		storageClient.Close()
-	})(languageClient, storageClient)
+	defer storageClient.Close()
 
 	// pull posts from cloud storage
 	storageCTX, storageCTXCancel := context.WithTimeout(ctx, time.Second*50)
@@ -118,12 +98,7 @@ func analyzePostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-
-	fmt.Fprintf(w, "analyzing %d posts", len(posts))
 	log.Printf("analyzing %d posts\n", len(posts))
-
-	// w.Write([]byte(fmt.Sprintf("go to /api/progress?id=%d to check on this requests progress", 123)))
 
 	analyzedPosts, err := sentiment.AnalyzeEntitesInPosts(ctx, languageClient, posts)
 
@@ -153,4 +128,31 @@ func analyzePostHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("uploaded analyzed posts to '%s'\n", projectBucket+"/"+outputFilename)
 
 	// go signalFinished()
+}
+
+func analyzePostHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("must be GET request"))
+
+		return
+	}
+
+	query := r.URL.Query()
+
+	// this file must live within cloud storage
+	filename := query.Get("filename")
+	outputFilename := appendToFilename(filename, "analyzed")
+
+	if filename == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("missing required input filename"))
+
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "analyzing \"%s\"", filename)
+
+	go startAnalysis(filename, outputFilename)
 }
