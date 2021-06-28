@@ -10,17 +10,17 @@ import (
 
 // RedditPost is the struct of a reddit post pulled from this repos' scraped post
 type RedditPost struct {
-	Title            string   `json:"title,omitempty"`
-	Score            int      `json:"score,omitempty"`
-	ID               string   `json:"id,omitempty"`
-	URL              string   `json:"url,omitempty"`
-	CommentCount     int      `json:"comms_num,omitempty"`
-	CreatedAt        float32  `json:"created,omitempty"`
-	Body             string   `json:"body,omitempty"`
-	Timestamp        float32  `json:"timestamp,omitempty"` // same as CreatedAt
-	Comments         []string `json:"comments,omitempty"`
-	Analysis         Analysis `json:"analysis,omitempty"`
-	CommentsAnalysis Analysis `json:"commentsAnalysis,omitempty"`
+	Title        string   `json:"title,omitempty"`
+	Score        int      `json:"score,omitempty"`
+	ID           string   `json:"id,omitempty"`
+	URL          string   `json:"url,omitempty"`
+	CommentCount int      `json:"comms_num,omitempty"`
+	CreatedAt    float32  `json:"created,omitempty"`
+	Body         string   `json:"body,omitempty"`
+	Timestamp    float32  `json:"timestamp,omitempty"` // same as CreatedAt
+	Comments     []string `json:"comments,omitempty"`
+	Analysis     Analysis `json:"analysis,omitempty"`
+	// CommentsAnalysis Analysis `json:"commentsAnalysis,omitempty"`
 }
 
 // Analysis hold the results from the sentiment analysis from Google's API
@@ -94,21 +94,21 @@ func pruneEmptyPosts(posts []RedditPost) []RedditPost {
 }
 
 // pruneEmptyComments remove reddit posts where there is no comments
-func pruneEmptyComments(posts []RedditPost) []RedditPost {
-	postsWithComments := make([]RedditPost, 0)
+// func pruneEmptyComments(posts []RedditPost) []RedditPost {
+// 	postsWithComments := make([]RedditPost, 0)
 
-	for i := 0; i < len(posts); i++ {
-		post := posts[i]
+// 	for i := 0; i < len(posts); i++ {
+// 		post := posts[i]
 
-		if post.CommentCount < 1 {
-			continue
-		}
+// 		if post.CommentCount < 1 {
+// 			continue
+// 		}
 
-		postsWithComments = append(postsWithComments, post)
-	}
+// 		postsWithComments = append(postsWithComments, post)
+// 	}
 
-	return postsWithComments
-}
+// 	return postsWithComments
+// }
 
 // getEntityCount counts all instances of each entity found
 func getEntityCount(entities []*languagepb.Entity) map[string]int {
@@ -205,27 +205,27 @@ func AnalyzePosts(ctx context.Context, client *language.Client, posts []RedditPo
 // analyzeComments send each reddit post's comment to Google's api for sentiment analysis
 // mutates each post's Analyze.Score property and return the posts and no error
 // if an error is present then empty posts and nil
-func AnalyzeComments(ctx context.Context, client *language.Client, posts []RedditPost) ([]RedditPost, error) {
-	postsWithComments := pruneEmptyComments(posts)
-	// postCount := len(postsWithComments)
+// func AnalyzeComments(ctx context.Context, client *language.Client, posts []RedditPost) ([]RedditPost, error) {
+// 	postsWithComments := pruneEmptyComments(posts)
+// postCount := len(postsWithComments)
 
-	// Google's limits: 600 requests per minute, 800k per day
-	// TODO: limit the requests to 10 request per second to abide to Google's limit
-	// for i := 0; i < postCount; i++ {
-	// 	post := postsWithComments[i]
+// Google's limits: 600 requests per minute, 800k per day
+// TODO: limit the requests to 10 request per second to abide to Google's limit
+// for i := 0; i < postCount; i++ {
+// 	post := postsWithComments[i]
 
-	// 	analysis, err := analyzeSentiment(ctx, client, post.Body)
+// 	analysis, err := analyzeSentiment(ctx, client, post.Body)
 
-	// 	if err != nil {
-	// 		return []RedditPost{}, err
-	// 	}
+// 	if err != nil {
+// 		return []RedditPost{}, err
+// 	}
 
-	// 	score := analysis.DocumentSentiment.Score
+// 	score := analysis.DocumentSentiment.Score
 
-	// Keep a running total of the sentiment
-	// 	postsWithComments[i].CommentsAnalysis.Sentiment.Score += score
-	// 	postsWithComments[i].CommentsAnalysis.Sentiment.ParsedSentiment = parseSentiment(score)
-	// }
+// Keep a running total of the sentiment
+// 	postsWithComments[i].CommentsAnalysis.Sentiment.Score += score
+// 	postsWithComments[i].CommentsAnalysis.Sentiment.ParsedSentiment = parseSentiment(score)
+// }
 
-	return postsWithComments, nil
-}
+// 	return postsWithComments, nil
+// }

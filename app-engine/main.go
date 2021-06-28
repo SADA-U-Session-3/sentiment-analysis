@@ -42,6 +42,40 @@ func main() {
 	}
 }
 
+// AnalysisWrapper allows the analysis to be written to json without a lot of nesting
+type AnalysisWrapper struct {
+	ID        string           `json:"id"`
+	Entity    map[string]int   `json:"entity"`
+	Sentiment SentimentWrapper `json:"sentiment"`
+}
+
+// SentimentWrapper is a wrapper for a better output when writing to json
+type SentimentWrapper struct {
+	Score           float32 `json:"score,omitempty"`
+	ParsedSentiment string  `json:"parsedSentiment"`
+}
+
+func toWrapper(posts []sentiment.RedditPost) []AnalysisWrapper {
+	postsWrapper := make([]AnalysisWrapper, 0)
+
+	for i := 0; i < len(posts); i++ {
+		post := posts[i]
+
+		wrappedPost := AnalysisWrapper{
+			ID:     post.ID,
+			Entity: post.Analysis.Entity.Count,
+			Sentiment: SentimentWrapper{
+				Score:           post.Analysis.Sentiment.Score,
+				ParsedSentiment: post.Analysis.Sentiment.ParsedSentiment,
+			},
+		}
+
+		postsWrapper = append(postsWrapper, wrappedPost)
+	}
+
+	return postsWrapper
+}
+
 func appendToFilename(filename string, addendum string) string {
 	extension := filepath.Ext(filename)
 
@@ -53,6 +87,7 @@ func startAnalysis(filename, outputFilename string) {
 	projectBucket := "rube_goldberg_project"
 	subBucket := "reddit_data"
 
+	// initialize Google API clients
 	ctx := context.Background()
 
 	languageClient, err := language.NewClient(ctx)
@@ -110,6 +145,8 @@ func startAnalysis(filename, outputFilename string) {
 
 	log.Printf("after pruning posts with empty body we analyzed %d posts\n", len(analyzedPosts))
 
+	wrappedPosts := toWrapper(analyzedPosts)
+
 	// save to cloud storage
 	storageCTX, storageCTXCancel = context.WithTimeout(ctx, time.Second*50)
 
@@ -119,7 +156,7 @@ func startAnalysis(filename, outputFilename string) {
 
 	defer storageWriter.Close()
 
-	if err := json.NewEncoder(storageWriter).Encode(analyzedPosts); err != nil {
+	if err := json.NewEncoder(storageWriter).Encode(wrappedPosts); err != nil {
 		log.Printf("failed to upload analyzed posts: %v\n", err)
 
 		return
