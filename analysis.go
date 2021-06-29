@@ -24,13 +24,20 @@ type RedditPost struct {
 
 // Analysis hold the results from the sentiment analysis from Google's API
 type Analysis struct {
-	Sentiment struct {
-		Score           float32 `json:"score,omitempty"`
-		ParsedSentiment string  `json:"parsedSentiment,omitempty"`
-	} `json:"sentiment,omitempty"`
-	Entity struct {
-		Count map[string]int `json:"count,omitempty"`
-	} `json:"entity,omitempty"`
+	Sentiment SentimentWrapper `json:"sentiment,omitempty"`
+	Entity    []EntityWrapper  `json:"entity,omitempty"`
+}
+
+// EntityWrapper is a wrapper for a better output when writing to json
+type EntityWrapper struct {
+	Keyword string `json:"keyword"`
+	Count   int    `json:"count"`
+}
+
+// SentimentWrapper is a wrapper for a better output when writing to json
+type SentimentWrapper struct {
+	Score           float32 `json:"score,omitempty"`
+	ParsedSentiment string  `json:"parsedSentiment,omitempty"`
 }
 
 // Posts a wrapper struct around the Hot and Top posts that help parse the scraped Reddit posts in this repo
@@ -93,8 +100,9 @@ func pruneEmptyPosts(posts []RedditPost) []RedditPost {
 }
 
 // getEntityCount counts all instances of each entity found
-func getEntityCount(entities []*languagepb.Entity) map[string]int {
+func getEntityCount(entities []*languagepb.Entity) []EntityWrapper {
 	entityTracker := make(map[string]int)
+	wrapper := make([]EntityWrapper, 0)
 
 	for i := 0; i < len(entities); i++ {
 		entity := entities[i]
@@ -106,7 +114,16 @@ func getEntityCount(entities []*languagepb.Entity) map[string]int {
 		}
 	}
 
-	return entityTracker
+	for entity := range entityTracker {
+		e := EntityWrapper{
+			Keyword: entity,
+			Count:   entityTracker[entity],
+		}
+
+		wrapper = append(wrapper, e)
+	}
+
+	return wrapper
 }
 
 func analyzeSentiment(ctx context.Context, client *language.Client, text string) (*languagepb.AnalyzeSentimentResponse, error) {
@@ -147,7 +164,7 @@ func AnalyzeEntitesInPosts(ctx context.Context, client *language.Client, posts [
 			return []RedditPost{}, err
 		}
 
-		post.Analysis.Entity.Count = getEntityCount(analysis.Entities)
+		post.Analysis.Entity = getEntityCount(analysis.Entities)
 
 		postsWithBodyText[i] = post
 	}
@@ -182,11 +199,4 @@ func AnalyzePosts(ctx context.Context, client *language.Client, posts []RedditPo
 	}
 
 	return postsWithBodyText, nil
-}
-
-// InitLimiter utilizes the token bucket algorithm to successfully rate limt
-// requests to Google's Natural Language API.
-// Google's limits are 600 requests per minute
-func InitLimiter() {
-
 }
