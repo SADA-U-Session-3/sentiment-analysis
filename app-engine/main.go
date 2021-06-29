@@ -16,15 +16,38 @@ import (
 	"github.com/SADA-U-Session-3/sentiment-analysis"
 )
 
-func main() {
-	// download reddit posts from json on cloud storage
+const projectBucket = "rube_goldberg_project"
+const redditBucket = "reddit_data"
+const customerBucket = "customer_data"
 
+var app appWrapper
+
+func main() {
 	// run posts through entity/sentiment api while abiding
 	// by NL api 600 requests per minute
+	ctx := context.Background()
 
-	// send results to cloud storage
+	languageClient, err := language.NewClient(ctx)
 
-	// signal we are finished once we have saved posts to cloud storage
+	if err != nil {
+		log.Printf("failed to create language client: %v\n", err)
+
+		return
+	}
+
+	storageClient, err := storage.NewClient(ctx)
+
+	if err != nil {
+		log.Printf("failed to create storage client: %v\n", err)
+
+		return
+	}
+
+	app.ctx = ctx
+	app.languageClient = languageClient
+	app.storageClient = storageClient
+
+	defer app.closeClients()
 
 	http.HandleFunc("/api/analyze/posts", analyzePostHandler)
 
@@ -82,81 +105,110 @@ func appendToFilename(filename string, addendum string) string {
 	return strings.Replace(filename, extension, "_", 1) + addendum + extension
 }
 
-func startAnalysis(filename, outputFilename string) {
+type appWrapper struct {
+	ctx            context.Context
+	languageClient *language.Client
+	storageClient  *storage.Client
+}
 
-	projectBucket := "rube_goldberg_project"
-	subBucket := "reddit_data"
-
-	// initialize Google API clients
-	ctx := context.Background()
-
-	languageClient, err := language.NewClient(ctx)
-
-	if err != nil {
-		log.Printf("failed to create language client: %v\n", err)
-
-		return
-	}
-
-	defer languageClient.Close()
-
-	storageClient, err := storage.NewClient(ctx)
-
-	if err != nil {
-		log.Printf("failed to create storage client: %v\n", err)
-
-		return
-	}
-
-	defer storageClient.Close()
-
-	// pull posts from cloud storage
-	storageCTX, storageCTXCancel := context.WithTimeout(ctx, time.Second*50)
+func (wrapper appWrapper) fetchRedditPosts(filename string) ([]sentiment.RedditPost, error) {
+	storageCTX, storageCTXCancel := context.WithTimeout(wrapper.ctx, time.Second*50)
 
 	defer storageCTXCancel()
 
 	var posts []sentiment.RedditPost
 
-	storageReader, err := storageClient.Bucket(projectBucket + "/" + subBucket).Object(filename).NewReader(storageCTX)
+	storageReader, err := wrapper.storageClient.Bucket(projectBucket + "/" + redditBucket).Object(filename).NewReader(storageCTX)
 
 	if err != nil {
-		log.Printf("getting bucket reader failed: %v\n", err)
 
-		return
+		return posts, fmt.Errorf("getting bucket reader failed: %v\n", err)
 	}
 
 	defer storageReader.Close()
 
 	if err := json.NewDecoder(storageReader).Decode(&posts); err != nil {
-		log.Printf("parsing json failed: %v\n", err)
+		return posts, fmt.Errorf("parsing json failed: %v\n", err)
+	}
+
+	return posts, nil
+}
+
+func (wrapper appWrapper) saveAnalyzedPosts(outputFilename string, posts []AnalysisWrapper) error {
+	storageCTX, storageCTXCancel := context.WithTimeout(wrapper.ctx, time.Second*50)
+
+	defer storageCTXCancel()
+
+	storageWriter := wrapper.storageClient.Bucket(projectBucket).Object(redditBucket + "/" + outputFilename).NewWriter(storageCTX)
+
+	defer storageWriter.Close()
+
+	return json.NewEncoder(storageWriter).Encode(posts)
+}
+
+func (wrapper appWrapper) analyzeEntitySentiment(posts []sentiment.RedditPost) ([]sentiment.RedditPost, error) {
+	return sentiment.AnalyzeEntitesInPosts(wrapper.ctx, wrapper.languageClient, posts)
+}
+
+func (wrapper appWrapper) analyzeSentiment(posts []sentiment.RedditPost) ([]sentiment.RedditPost, error) {
+	return sentiment.AnalyzePosts(wrapper.ctx, wrapper.languageClient, posts)
+}
+
+func (wrapper appWrapper) closeClients() {
+	if err := wrapper.languageClient.Close(); err != nil {
+		log.Printf("failed to close language client: %v\n", err)
 
 		return
 	}
 
-	log.Printf("analyzing %d posts\n", len(posts))
+	if err := wrapper.storageClient.Close(); err != nil {
+		log.Printf("failed to close storage client: %v\n", err)
 
-	analyzedPosts, err := sentiment.AnalyzeEntitesInPosts(ctx, languageClient, posts)
+		return
+	}
+}
+
+// startEntityAnalysis analyzes entities from json file in google cloud storage
+func startEntityAnalysis(filename, outputFilename string) {
+	// pull posts from cloud storage
+	log.Println("downloading .json file")
+
+	posts, err := app.fetchRedditPosts(filename)
 
 	if err != nil {
-		log.Printf("analysis failed: %v\n", err)
+		log.Printf("failed to fetch reddit posts from \"%s\": %v", filename, err)
 
 		return
 	}
 
-	log.Printf("after pruning posts with empty body we analyzed %d posts\n", len(analyzedPosts))
+	log.Printf("starting entity analysis with %d posts\n", len(posts))
+
+	analyzedPosts, err := app.analyzeEntitySentiment(posts)
+
+	if err != nil {
+		log.Printf("failed to analyze entities from \"%s\": %v\n", filename, err)
+
+		return
+	}
+
+	postCount := len(analyzedPosts)
+
+	log.Printf("after pruning posts with empty body we analyzed entity on %d posts\n", postCount)
+
+	analyzedPosts, err = app.analyzeSentiment(analyzedPosts)
+
+	if err != nil {
+		log.Printf("failed to analyze entities from \"%s\": %v\n", filename, err)
+
+		return
+	}
+
+	log.Printf("after entity analysis we analyzed sentiment on %d posts\n", postCount)
 
 	wrappedPosts := toWrapper(analyzedPosts)
 
 	// save to cloud storage
-	storageCTX, storageCTXCancel = context.WithTimeout(ctx, time.Second*50)
-
-	defer storageCTXCancel()
-
-	storageWriter := storageClient.Bucket(projectBucket).Object(subBucket + "/" + outputFilename).NewWriter(storageCTX)
-
-	defer storageWriter.Close()
-
-	if err := json.NewEncoder(storageWriter).Encode(wrappedPosts); err != nil {
+	if err := app.saveAnalyzedPosts(outputFilename, wrappedPosts); err != nil {
 		log.Printf("failed to upload analyzed posts: %v\n", err)
 
 		return
@@ -164,7 +216,7 @@ func startAnalysis(filename, outputFilename string) {
 
 	log.Printf("uploaded analyzed posts to '%s'\n", projectBucket+"/"+outputFilename)
 
-	// go signalFinished()
+	// signalFinished()
 }
 
 func analyzePostHandler(w http.ResponseWriter, r *http.Request) {
@@ -179,7 +231,6 @@ func analyzePostHandler(w http.ResponseWriter, r *http.Request) {
 
 	// this file must live within cloud storage
 	filename := query.Get("filename")
-	outputFilename := appendToFilename(filename, "analyzed")
 
 	if filename == "" {
 		w.WriteHeader(http.StatusBadRequest)
@@ -188,8 +239,10 @@ func analyzePostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	outputFilename := appendToFilename(filename, "analyzed")
+
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "analyzing \"%s\"", filename)
 
-	go startAnalysis(filename, outputFilename)
+	go startEntityAnalysis(filename, outputFilename)
 }
