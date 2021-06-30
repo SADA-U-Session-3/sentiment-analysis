@@ -12,13 +12,16 @@ import (
 	"time"
 
 	language "cloud.google.com/go/language/apiv1"
+	"cloud.google.com/go/pubsub"
 	"cloud.google.com/go/storage"
 	"github.com/SADA-U-Session-3/sentiment-analysis"
 )
 
+const projectID = "sada-u-sess-3-firestore"
 const projectBucket = "rube_goldberg_project"
 const redditBucket = "reddit_data"
 const customerBucket = "customer_data"
+const pubsubTopic = "rube_goldberg"
 
 var app appWrapper
 
@@ -43,9 +46,37 @@ func main() {
 		return
 	}
 
+	pubsubClient, err := pubsub.NewClient(ctx, projectID)
+
+	if err != nil {
+		log.Printf("failed to create storage client: %v\n", err)
+
+		return
+	}
+
 	app.ctx = ctx
 	app.languageClient = languageClient
 	app.storageClient = storageClient
+	app.pubsubClient = pubsubClient
+
+	// check that our topic exists, so we can function like expected
+	topic := app.pubsubClient.Topic(pubsubTopic)
+
+	doesTopicExist, err := topic.Exists(ctx)
+
+	if err != nil {
+		log.Fatalf("checking if the pubsub topic exists failed: %v", err)
+
+		return
+	}
+
+	if !doesTopicExist {
+		log.Fatalf("\"%s\" does not exist as a topic", pubsubTopic)
+
+		return
+	}
+
+	app.pubsubTopic = topic
 
 	defer app.closeClients()
 
@@ -143,10 +174,17 @@ func appendToFilename(filename string, addendum string) string {
 	return strings.Replace(filename, extension, "_", 1) + addendum + extension
 }
 
+type PubSubEvent struct {
+	EventType string `json:"eventType"`
+	Payload   string `json:"payload"`
+}
+
 type appWrapper struct {
 	ctx            context.Context
 	languageClient *language.Client
 	storageClient  *storage.Client
+	pubsubClient   *pubsub.Client
+	pubsubTopic    *pubsub.Topic
 }
 
 func (wrapper appWrapper) fetchRedditPosts(filename string) ([]sentiment.RedditPost, error) {
@@ -211,6 +249,31 @@ func (wrapper appWrapper) analyzeEntitySentiment(posts []sentiment.RedditPost) (
 	return sentiment.AnalyzeEntitesInPosts(wrapper.ctx, wrapper.languageClient, posts)
 }
 
+func (wrapper appWrapper) triggerSentimentViaPubSub(filename string) error {
+	if filename == "" {
+		return fmt.Errorf("filename is required")
+	}
+
+	event := PubSubEvent{
+		EventType: "update-post-sentiment",
+		Payload:   filename,
+	}
+
+	eventBytes, err := json.Marshal(&event)
+
+	if err != nil {
+		return err
+	}
+
+	msg := &pubsub.Message{
+		Data: eventBytes,
+	}
+
+	_, err = wrapper.pubsubTopic.Publish(wrapper.ctx, msg).Get(wrapper.ctx)
+
+	return err
+}
+
 func (wrapper appWrapper) analyzeSentiment(posts []sentiment.RedditPost) ([]sentiment.RedditPost, error) {
 	return sentiment.AnalyzePosts(wrapper.ctx, wrapper.languageClient, posts)
 }
@@ -227,6 +290,12 @@ func (wrapper appWrapper) closeClients() {
 
 		return
 	}
+
+	if err := wrapper.pubsubClient.Close(); err != nil {
+		log.Printf("failed to close pubsub client: %v\n", err)
+
+		return
+	}
 }
 
 func isAnalysisFilename(filename string) bool {
@@ -236,7 +305,7 @@ func isAnalysisFilename(filename string) bool {
 }
 
 // startEntityAnalysis analyzes entities from json file in google cloud storage
-func startEntityAnalysis(filename, outputFilename string) {
+func startEntityAnalysis(filename string, outputFilename string, onAnalyzed func(analyzedFilename string)) {
 	var wrappedPosts []AnalysisWrapper
 	var posts []sentiment.RedditPost
 	var postCount int
@@ -351,11 +420,11 @@ func startEntityAnalysis(filename, outputFilename string) {
 
 	log.Printf("uploaded analyzed posts to '%s'\n", projectBucket+"/"+outputFilename)
 
-	// signalFinished()
+	onAnalyzed(outputFilename)
 }
 
 // startSentimentAnalysis analyzes entities from json file in google cloud storage
-func startSentimentAnalysis(filename, outputFilename string) {
+func startSentimentAnalysis(filename string, outputFilename string, onAnalyzed func(analyzedFilename string)) {
 	var wrappedPosts []AnalysisWrapper
 	var posts []sentiment.RedditPost
 	var postCount int
@@ -470,7 +539,7 @@ func startSentimentAnalysis(filename, outputFilename string) {
 
 	log.Printf("uploaded analyzed posts to '%s'\n", projectBucket+"/"+outputFilename)
 
-	// signalFinished()
+	onAnalyzed(outputFilename)
 }
 
 func analyzeEntityHandler(w http.ResponseWriter, r *http.Request) {
@@ -498,7 +567,11 @@ func analyzeEntityHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "analyzing \"%s\"", filename)
 
-	go startEntityAnalysis(filename, outputFilename)
+	onAnalyzed := func(analyzedFilename string) {
+		app.triggerSentimentViaPubSub(analyzedFilename)
+	}
+
+	go startEntityAnalysis(filename, outputFilename, onAnalyzed)
 }
 
 func analyzeSentimentHandler(w http.ResponseWriter, r *http.Request) {
@@ -526,5 +599,10 @@ func analyzeSentimentHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "analyzing \"%s\"", filename)
 
-	go startSentimentAnalysis(filename, outputFilename)
+	onAnalyzed := func(analyzedFilename string) {
+		log.Printf("finished analyzing sentiment!\nstarting next convolution...")
+		// app.triggerNextStep()
+	}
+
+	go startSentimentAnalysis(filename, outputFilename, onAnalyzed)
 }
