@@ -24,8 +24,8 @@ type RedditPost struct {
 
 // Analysis hold the results from the sentiment analysis from Google's API
 type Analysis struct {
-	Sentiment SentimentWrapper `json:"sentiment,omitempty"`
-	Entity    []EntityWrapper  `json:"entity,omitempty"`
+	Sentiment SentimentWrapper `json:"sentiment"`
+	Entity    []EntityWrapper  `json:"entity"`
 }
 
 // EntityWrapper is a wrapper for a better output when writing to json
@@ -36,8 +36,8 @@ type EntityWrapper struct {
 
 // SentimentWrapper is a wrapper for a better output when writing to json
 type SentimentWrapper struct {
-	Score           float32 `json:"score,omitempty"`
-	ParsedSentiment string  `json:"parsedSentiment,omitempty"`
+	Score           float32 `json:"score"`
+	ParsedSentiment string  `json:"parsedSentiment"`
 }
 
 // Posts a wrapper struct around the Hot and Top posts that help parse the scraped Reddit posts in this repo
