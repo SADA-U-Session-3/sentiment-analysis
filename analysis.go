@@ -46,6 +46,26 @@ type Posts struct {
 	TopPosts []RedditPost `json:"top_posts,omitempty"`
 }
 
+type CustomerAnalysis struct {
+	Email     string           `json:"email"`
+	Comment   string           `json:"comment"`
+	Sentiment SentimentWrapper `json:"sentiment"`
+	Entity    []EntityWrapper  `json:"entity"`
+}
+
+func getOverallScore(entities []*languagepb.Entity) float32 {
+	score := float32(0)
+	entityCount := len(entities)
+
+	for _, entity := range entities {
+		for _, mention := range entity.Mentions {
+			score += mention.Sentiment.Score
+		}
+	}
+
+	return score / float32(entityCount)
+}
+
 // PrintAnalysis prints the results of the posts from the Sentiment Analysis api
 func PrintAnalysis(posts []RedditPost) {
 	for i := 0; i < len(posts); i++ {
@@ -199,4 +219,39 @@ func AnalyzePosts(ctx context.Context, client *language.Client, posts []RedditPo
 	}
 
 	return postsWithBodyText, nil
+}
+
+func AnalyzeCustomerComments(ctx context.Context, client *language.Client, comments []CustomerAnalysis) ([]CustomerAnalysis, error) {
+	commentCount := len(comments)
+
+	for i := 0; i < commentCount; i++ {
+		comment := comments[i]
+
+		analysis, err := analyzeEntitySentiment(ctx, client, comment.Comment)
+
+		if err != nil {
+			return comments, err
+		}
+
+		score := float32(0)
+
+		if len(analysis.Entities) > 0 {
+			score = getOverallScore(analysis.Entities)
+		}
+
+		// Keep a running total of the sentiment
+		comments[i].Sentiment.Score += score
+		comments[i].Sentiment.ParsedSentiment = parseSentiment(score)
+
+		for _, entity := range analysis.Entities {
+			wrapped := EntityWrapper{
+				Keyword: entity.Name,
+				Count:   len(entity.Mentions),
+			}
+
+			comments[i].Entity = append(comments[i].Entity, wrapped)
+		}
+	}
+
+	return comments, nil
 }
