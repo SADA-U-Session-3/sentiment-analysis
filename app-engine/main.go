@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -20,6 +21,7 @@ import (
 const projectID = "sada-u-sess-3-firestore"
 const projectBucket = "rube_goldberg_project"
 const redditBucket = "reddit_data"
+
 const customerBucket = "customer_data"
 const pubsubTopic = "rube_goldberg"
 
@@ -82,6 +84,7 @@ func main() {
 
 	http.HandleFunc("/api/analyze/sentiment", analyzeSentimentHandler)
 	http.HandleFunc("/api/analyze/entity", analyzeEntityHandler)
+	http.HandleFunc("/api/analyze/customer", analyzeCustomerHandler)
 
 	port := os.Getenv("PORT")
 
@@ -102,22 +105,6 @@ type AnalysisWrapper struct {
 	ID        string                     `json:"id"`
 	Entity    []sentiment.EntityWrapper  `json:"entity"`
 	Sentiment sentiment.SentimentWrapper `json:"sentiment"`
-}
-
-func fromWrapper(posts []AnalysisWrapper) []sentiment.RedditPost {
-	postsWrapper := make([]sentiment.RedditPost, 0)
-
-	for i := 0; i < len(posts); i++ {
-		post := posts[i]
-
-		wrappedPost := sentiment.RedditPost{
-			ID: post.ID,
-		}
-
-		postsWrapper = append(postsWrapper, wrappedPost)
-	}
-
-	return postsWrapper
 }
 
 func toWrapper(posts []sentiment.RedditPost) []AnalysisWrapper {
@@ -233,6 +220,45 @@ func (wrapper appWrapper) fetchRedditAnalyzedPosts(filename string) ([]AnalysisW
 	return posts, nil
 }
 
+func (wrapper appWrapper) fetchCustomerComments(filename string) ([]sentiment.CustomerAnalysis, error) {
+	storageCTX, storageCTXCancel := context.WithTimeout(wrapper.ctx, time.Second*50)
+
+	defer storageCTXCancel()
+
+	var comments [][]string
+	var commentsWrapper []sentiment.CustomerAnalysis
+
+	storageReader, err := wrapper.storageClient.Bucket(projectBucket + "/" + customerBucket).Object(filename).NewReader(storageCTX)
+
+	if err != nil {
+		return commentsWrapper, fmt.Errorf("getting bucket reader failed: %v", err)
+	}
+
+	defer storageReader.Close()
+
+	csvReader := csv.NewReader(storageReader)
+
+	comments, err = csvReader.ReadAll()
+
+	if err != nil {
+		return commentsWrapper, fmt.Errorf("parsing csv failed: %v", err)
+	}
+
+	for i := 0; i < len(comments); i++ {
+		comment := comments[i]
+
+		commentWrapper := sentiment.CustomerAnalysis{
+			Email:   comment[3],
+			Comment: comment[2],
+		}
+
+		commentsWrapper = append(commentsWrapper, commentWrapper)
+
+	}
+
+	return commentsWrapper, nil
+}
+
 func (wrapper appWrapper) saveAnalyzedPosts(outputFilename string, posts []AnalysisWrapper) error {
 	storageCTX, storageCTXCancel := context.WithTimeout(wrapper.ctx, time.Second*50)
 
@@ -243,6 +269,18 @@ func (wrapper appWrapper) saveAnalyzedPosts(outputFilename string, posts []Analy
 	defer storageWriter.Close()
 
 	return json.NewEncoder(storageWriter).Encode(posts)
+}
+
+func (wrapper appWrapper) saveAnalyzedCustomerComments(outputFilename string, comments []sentiment.CustomerAnalysis) error {
+	storageCTX, storageCTXCancel := context.WithTimeout(wrapper.ctx, time.Second*50)
+
+	defer storageCTXCancel()
+
+	storageWriter := wrapper.storageClient.Bucket(projectBucket).Object(customerBucket + "/" + outputFilename).NewWriter(storageCTX)
+
+	defer storageWriter.Close()
+
+	return json.NewEncoder(storageWriter).Encode(comments)
 }
 
 func (wrapper appWrapper) analyzeEntitySentiment(posts []sentiment.RedditPost) ([]sentiment.RedditPost, error) {
@@ -276,6 +314,10 @@ func (wrapper appWrapper) triggerSentimentViaPubSub(filename string) error {
 
 func (wrapper appWrapper) analyzeSentiment(posts []sentiment.RedditPost) ([]sentiment.RedditPost, error) {
 	return sentiment.AnalyzePosts(wrapper.ctx, wrapper.languageClient, posts)
+}
+
+func (wrapper appWrapper) analyzeCustomerComments(comments []sentiment.CustomerAnalysis) ([]sentiment.CustomerAnalysis, error) {
+	return sentiment.AnalyzeCustomerComments(wrapper.ctx, wrapper.languageClient, comments)
 }
 
 func (wrapper appWrapper) closeClients() {
@@ -542,6 +584,42 @@ func startSentimentAnalysis(filename string, outputFilename string, onAnalyzed f
 	onAnalyzed(outputFilename)
 }
 
+func startCustomerAnalysis(filename string, outputFilename string, onAnalyzed func(analyzedFilename string)) {
+	comments, err := app.fetchCustomerComments(filename)
+
+	if err != nil {
+		log.Printf("fetching customer comments failed: %s", err)
+
+		return
+	}
+
+	log.Printf("found %d customer comments\n", len(comments))
+	log.Println("starting analysis")
+
+	analyzedComments, err := app.analyzeCustomerComments(comments)
+
+	if err != nil {
+		log.Printf("failed analyzing customer comments: %v\n", err)
+
+		return
+	}
+
+	log.Printf("analyzed %d customer comments\n", len(analyzedComments))
+
+	// we save as .json, so we must change the extension
+	outputFilename = strings.Replace(outputFilename, ".csv", ".json", 1)
+
+	log.Printf("saving analysis as \"%s\"\n", outputFilename)
+
+	if err := app.saveAnalyzedCustomerComments(outputFilename, analyzedComments); err != nil {
+		log.Printf("failed saving customer comments: %v\n", err)
+
+		return
+	}
+
+	onAnalyzed(outputFilename)
+}
+
 func analyzeEntityHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		w.WriteHeader(http.StatusBadRequest)
@@ -605,4 +683,37 @@ func analyzeSentimentHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go startSentimentAnalysis(filename, outputFilename, onAnalyzed)
+}
+
+func analyzeCustomerHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("must be GET request"))
+
+		return
+	}
+
+	query := r.URL.Query()
+
+	// this file must live within cloud storage
+	filename := query.Get("filename")
+
+	if filename == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("missing required input filename"))
+
+		return
+	}
+
+	outputFilename := appendToFilename(filename, "analyzed")
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "analyzing \"%s\"", filename)
+
+	onAnalyzed := func(analyzedFilename string) {
+		log.Printf("finished analyzing sentiment!\nstarting next convolution...")
+		// app.triggerNextStep()
+	}
+
+	go startCustomerAnalysis(filename, outputFilename, onAnalyzed)
 }
