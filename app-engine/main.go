@@ -247,6 +247,11 @@ func (wrapper appWrapper) fetchCustomerComments(filename string) ([]sentiment.Cu
 	for i := 0; i < len(comments); i++ {
 		comment := comments[i]
 
+		// do no save the headers
+		if i == 0 {
+			continue
+		}
+
 		commentWrapper := sentiment.CustomerAnalysis{
 			Email:   comment[3],
 			Comment: comment[2],
