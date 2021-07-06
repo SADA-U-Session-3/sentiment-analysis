@@ -190,8 +190,16 @@ func (wrapper appWrapper) fetchRedditPosts(filename string) ([]sentiment.RedditP
 
 	defer storageReader.Close()
 
-	if err := json.NewDecoder(storageReader).Decode(&posts); err != nil {
-		return posts, fmt.Errorf("parsing json failed: %v", err)
+	decoder := json.NewDecoder(storageReader)
+
+	for decoder.More() {
+		var post sentiment.RedditPost
+
+		if err := decoder.Decode(&post); err != nil {
+			return posts, fmt.Errorf("parsing json failed: %v", err)
+		}
+
+		posts = append(posts, post)
 	}
 
 	return posts, nil
@@ -213,8 +221,16 @@ func (wrapper appWrapper) fetchRedditAnalyzedPosts(filename string) ([]AnalysisW
 
 	defer storageReader.Close()
 
-	if err := json.NewDecoder(storageReader).Decode(&posts); err != nil {
-		return posts, fmt.Errorf("parsing json failed: %v", err)
+	decoder := json.NewDecoder(storageReader)
+
+	for decoder.More() {
+		var post AnalysisWrapper
+
+		if err := decoder.Decode(&post); err != nil {
+			return posts, fmt.Errorf("parsing json failed: %v", err)
+		}
+
+		posts = append(posts, post)
 	}
 
 	return posts, nil
@@ -273,7 +289,17 @@ func (wrapper appWrapper) saveAnalyzedPosts(outputFilename string, posts []Analy
 
 	defer storageWriter.Close()
 
-	return json.NewEncoder(storageWriter).Encode(posts)
+	encoder := json.NewEncoder(storageWriter)
+
+	for i := 0; i < len(posts); i++ {
+		post := posts[i]
+
+		if err := encoder.Encode(post); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (wrapper appWrapper) saveAnalyzedCustomerComments(outputFilename string, comments []sentiment.CustomerAnalysis) error {
