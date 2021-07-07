@@ -269,8 +269,9 @@ func (wrapper appWrapper) fetchCustomerComments(filename string) ([]sentiment.Cu
 		}
 
 		commentWrapper := sentiment.CustomerAnalysis{
-			Email:   comment[3],
-			Comment: comment[2],
+			Timestamp: comment[0],
+			Email:     comment[3],
+			Comment:   comment[2],
 		}
 
 		commentsWrapper = append(commentsWrapper, commentWrapper)
@@ -311,7 +312,17 @@ func (wrapper appWrapper) saveAnalyzedCustomerComments(outputFilename string, co
 
 	defer storageWriter.Close()
 
-	return json.NewEncoder(storageWriter).Encode(comments)
+	encoder := json.NewEncoder(storageWriter)
+
+	for i := 0; i < len(comments); i++ {
+		comment := comments[i]
+
+		if err := encoder.Encode(comment); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (wrapper appWrapper) analyzeEntitySentiment(posts []sentiment.RedditPost) ([]sentiment.RedditPost, error) {
