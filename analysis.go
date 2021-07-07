@@ -47,6 +47,7 @@ type Posts struct {
 }
 
 type CustomerAnalysis struct {
+	Timestamp string           `json:"timestamp"`
 	Email     string           `json:"email"`
 	Comment   string           `json:"comment"`
 	Sentiment SentimentWrapper `json:"sentiment"`
