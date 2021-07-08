@@ -492,17 +492,17 @@ func startEntityAnalysis(filename string, outputFilename string) {
 	log.Printf("after pruning posts with empty body we analyzed sentiment and entity on %d posts\n", postCount)
 
 	// save to cloud storage
-	// if isAnalysisFilename(filename) {
-	// 	outputFilename = filename
-	// }
+	if isAnalysisFilename(filename) {
+		outputFilename = filename
+	}
 
-	// if err := app.saveAnalyzedPosts(outputFilename, wrappedPosts); err != nil {
-	// 	log.Printf("failed to upload analyzed posts: %v\n", err)
+	if err := app.saveAnalyzedPosts(outputFilename, wrappedPosts); err != nil {
+		log.Printf("failed to upload analyzed posts: %v\n", err)
 
-	// 	return
-	// }
+		return
+	}
 
-	// log.Printf("uploaded analyzed posts to '%s'\n", projectBucket+"/"+outputFilename)
+	log.Printf("uploaded analyzed posts to '%s'\n", projectBucket+"/"+outputFilename)
 }
 
 // startSentimentAnalysis analyzes entities from json file in google cloud storage
