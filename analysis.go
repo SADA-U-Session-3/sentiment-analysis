@@ -185,11 +185,21 @@ func AnalyzeEntitesInPosts(ctx context.Context, client *language.Client, posts [
 			return []RedditPost{}, err
 		}
 
+		score := float32(0)
+
+		if len(analysis.Entities) > 0 {
+			score = getOverallScore(analysis.Entities)
+		}
+
+		post.Analysis.Sentiment.Score += score
+		post.Analysis.Sentiment.ParsedSentiment = parseSentiment(score)
+
 		post.Analysis.Entity = getEntityCount(analysis.Entities)
 
 		postsWithBodyText[i] = post
 	}
 
+	fmt.Println(postsWithBodyText[0].Analysis.Sentiment.Score)
 	return postsWithBodyText, nil
 
 }

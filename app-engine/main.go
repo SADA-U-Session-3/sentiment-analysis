@@ -389,7 +389,7 @@ func isAnalysisFilename(filename string) bool {
 }
 
 // startEntityAnalysis analyzes entities from json file in google cloud storage
-func startEntityAnalysis(filename string, outputFilename string, onAnalyzed func(analyzedFilename string)) {
+func startEntityAnalysis(filename string, outputFilename string) {
 	var wrappedPosts []AnalysisWrapper
 	var posts []sentiment.RedditPost
 	var postCount int
@@ -476,7 +476,7 @@ func startEntityAnalysis(filename string, outputFilename string, onAnalyzed func
 			return
 		}
 
-		log.Printf("starting entity analysis with %d posts\n", postCount)
+		log.Printf("starting entity and sentiment analysis with %d posts\n", postCount)
 
 		analyzedPosts, err := app.analyzeEntitySentiment(posts)
 
@@ -489,22 +489,20 @@ func startEntityAnalysis(filename string, outputFilename string, onAnalyzed func
 		wrappedPosts = toWrapper(analyzedPosts)
 	}
 
-	log.Printf("after pruning posts with empty body we analyzed entity on %d posts\n", postCount)
+	log.Printf("after pruning posts with empty body we analyzed sentiment and entity on %d posts\n", postCount)
 
 	// save to cloud storage
-	if isAnalysisFilename(filename) {
-		outputFilename = filename
-	}
+	// if isAnalysisFilename(filename) {
+	// 	outputFilename = filename
+	// }
 
-	if err := app.saveAnalyzedPosts(outputFilename, wrappedPosts); err != nil {
-		log.Printf("failed to upload analyzed posts: %v\n", err)
+	// if err := app.saveAnalyzedPosts(outputFilename, wrappedPosts); err != nil {
+	// 	log.Printf("failed to upload analyzed posts: %v\n", err)
 
-		return
-	}
+	// 	return
+	// }
 
-	log.Printf("uploaded analyzed posts to '%s'\n", projectBucket+"/"+outputFilename)
-
-	onAnalyzed(outputFilename)
+	// log.Printf("uploaded analyzed posts to '%s'\n", projectBucket+"/"+outputFilename)
 }
 
 // startSentimentAnalysis analyzes entities from json file in google cloud storage
@@ -687,11 +685,11 @@ func analyzeEntityHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "analyzing \"%s\"", filename)
 
-	onAnalyzed := func(analyzedFilename string) {
-		app.triggerSentimentViaPubSub(analyzedFilename)
-	}
+	// onAnalyzed := func(analyzedFilename string) {
+	// 	app.triggerSentimentViaPubSub(analyzedFilename)
+	// }
 
-	go startEntityAnalysis(filename, outputFilename, onAnalyzed)
+	go startEntityAnalysis(filename, outputFilename)
 }
 
 func analyzeSentimentHandler(w http.ResponseWriter, r *http.Request) {
